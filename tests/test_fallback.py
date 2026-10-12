@@ -130,3 +130,22 @@ def test_provider_order_env(monkeypatch):
     monkeypatch.setenv("PROVIDER_ORDER", "openrouter,groq")
     r = c.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "hi"}]})
     assert r.headers["x-gateway-provider"] == "openrouter"
+
+
+def test_fallback_reported(monkeypatch):
+    def handler(req):
+        if "googleapis" in host(req):
+            return httpx.Response(404, json={"error": "model not found"})
+        return httpx.Response(200, json=OK)
+
+    c = setup(monkeypatch, handler)
+    r = c.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert r.headers["x-gateway-fallbacks"] == "gemini"
+    assert r.json()["gateway_fallbacks"][0]["status"] == 404
+
+
+def test_provider_models(monkeypatch):
+    c = setup(monkeypatch, lambda r: httpx.Response(200, json={"data": [{"id": "b"}, {"id": "a"}]}))
+    r = c.get("/v1/providers/groq/models")
+    assert r.json()["models"] == ["a", "b"]
+    assert c.get("/v1/providers/nvidia/models").status_code == 404
